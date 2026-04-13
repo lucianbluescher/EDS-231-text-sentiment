@@ -3,6 +3,8 @@ title: "Lab1: NYT API"
 author: "Your Name"
 date: "2026-04-07"
 output: html_document
+editor_options: 
+  chunk_output_type: inline
 ---
 
 ```{r setup, include=FALSE}
@@ -15,7 +17,7 @@ library(ggplot2) #plot word frequencies and publication dates
 
 ```{r API-key, include=FALSE}
 #assign API key.  When you create a NYT Dev account, you will be given a key
-#API_KEY <- "YOUR_API_KEY"
+API_KEY <- "dOnzAwo9kRWQKiJyDUNNAO9Qc0V9m3A9KQ9QBAyvA9Vq6yAI"
 ```
 
 Today we will be grabbing some data from the New York Times database via their API, then running some basic string manipulations, trying out the tidytext format, and creating some basic plots.
@@ -42,16 +44,18 @@ t = fromJSON(url, flatten = TRUE)
 ```{r inspect-result, eval = FALSE}
 #what type of object is t?
 
-t <- 
+t <- class(t)
 
 # how big is it?
 
+dim(t)
 
 # what variables are we working with?
 
+names(t)
   
 # how many articles matched our query
-
+hits = t$response$meta$hits
 ```
 
 Let's look at a piece of text. Our data frame has a column called `snippet` that contains a short excerpt, or "snippet" from the article. Let's grab a snippet and try out some basic `stringr` functions.
@@ -61,7 +65,14 @@ The `stringr` package gives us a consistent set of functions for working with ch
 ```{r basic_stringr, eval=FALSE}
 #assign a snippet to x to use as fodder for stringr functions.  You can follow along using the sentence on the next line.
 
+
 x <- "Governments around the world are enacting measures to try to protect workers from the dangers of heat stress. They’re barely keeping up with the risks."
+
+tolower(x)
+str_split(x, "t")
+str_replace(x, 'dangers', 'threats')
+str_replace(x, " ", "_")
+str_replace_all(x, " ", "_")
 
 ```
 
@@ -101,11 +112,11 @@ nytAPI = function(term1, begin_date, end_date, api) {
 Now I'll set some parameters for a bigger query.
 
 ```{r results}
-# results = nytAPI(term1 = "extreme heat", begin_date = "20240401", end_date = "20260401", api = API_KEY)
-# 
-# write.csv(results, paste0("NYT-", term1,".csv"))
-# 
-# nytDat <- results
+results = nytAPI(term1 = "extreme heat", begin_date = "20240401", end_date = "20260401", api = API_KEY)
+
+write.csv(results, paste0("NYT-", term1,".csv"))
+
+nytDat <- results
 ```
 
 You'll be compiling your own data set later, but for now, load the preconstructed nytDat so you can follow along.
@@ -120,11 +131,11 @@ nytDat <- results
 Let's visualize our dataset. Plotting \# articles per day let's us ask which days had the most coverage of extreme heat, whether coverage spikes around particular events (e.g. a major heatwave), and the overall pattern of media attention to the topic over time.
 
 ```{r date-plot}
-nytDat %>%
-  mutate(pubDay = as.Date(created_time)) %>%
-  group_by(pubDay) %>%
-  summarise(count=n()) %>%
-  filter(count >= 2) %>%
+nytDat 
+  mutate(pubDay = as.Date(created_time)) 
+  group_by(pubDay) 
+  summarise(count=n()) 
+  filter(count >= 2) 
   ggplot() +
   geom_bar(aes(x=reorder(pubDay, count), y=count), stat="identity") +
   coord_flip()
@@ -138,10 +149,11 @@ The New York Times doesn’t make full text of the articles available through th
 
 ```{r plot_frequencies}
 
-snippet <-  
+snippet <- names(nytDat[4])
 
 #use tidytext::unnest_tokens to put in tidy form
-tokenized <- 
+tokenized <- nytDat |> 
+   unnest_tokens(word, snippet)
 
 tokenized[]
 ```
@@ -149,12 +161,11 @@ tokenized[]
 Now we can count word frequencies across all snippets. This raw frequency distribution gives us a first look at what dominates the corpus.
 
 ```{r word_frequencies}
-tokenized %>%
-  count() %>%
-  filter() %>% 
-  mutate() %>%
-  ggplot(aes()) +
-  geom_col() 
+tokenized |> 
+  count(word, sort = TRUE) |> 
+  filter(n > 10) |> 
+  ggplot(aes(x = word, y = n)) +
+  geom_bar(stat = "identity")
 ```
 
 Uh oh, who knows what we need to do here?
@@ -168,17 +179,22 @@ The most frequent words in any corpus are almost always **stop words** — funct
 data(stop_words)
 stop_words
 
-tokenized <- 
+tokenized <- tokenized |> 
+  anti_join(stop_words, by = c("word" = "word"))
 
 #plot again  
-
+tokenized |> 
+  count(word, sort = TRUE) |> 
+  filter(n > 10) |> 
+  ggplot(aes(x = word, y = n)) +
+  geom_bar(stat = "identity")
 ```
 
 Let's look at our list of tokens. Does anything stand out?
 
 ```{r inspect-tokens}
 #inspect the list of tokens (words)
-
+head(tokenized$word)
 ```
 
 ### Text Normalization and Cleaning
@@ -187,16 +203,20 @@ Even after removing stop words, raw tokens often contain noise: digits mixed in 
 
 ```{r cleaning, eval=FALSE}
 #remove all numbers
-clean_tokens <-  
+clean_tokens <-  str_replace_all(tokenized$word, "[0-9]", "")
 
 #remove possessives
-clean_tokens <- 
+clean_tokens <- str_replace_all(clean_tokens, "'s", "")
 
 # add cleaned tokens back to df
 tokenized$clean <- clean_tokens
 
 #plot again
-
+tokenized |> 
+  count(word, sort = TRUE) |> 
+  filter(n > 10) |> 
+  ggplot(aes(x = word, y = n)) +
+  geom_bar(stat = "identity")
 ```
 
 ## Assignment (Due Tuesday 4/14 11:59pm)

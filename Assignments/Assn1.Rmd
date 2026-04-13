@@ -1,0 +1,194 @@
+---
+title: "Assignment 1"
+author: "Lucian Scher"
+date: "2026-04-07"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(jsonlite) #convert results from API queries into R-friendly formats 
+library(tidyverse)
+library(tidytext) #text data management and analysis
+library(ggplot2) #plot word frequencies and publication dates
+```
+
+```{r API-key, include=FALSE}
+API_KEY <- Sys.getenv("NYT_API_KEY")
+```
+
+In this report we query the New York Times Article Search API for dam removal over the last two years save the results, and summarize coverage over time. We plot how many matching articles appear per day, then tokenize article snippets to examine word frequencies. We remove common stop words and apply several text-cleaning steps so more informative terms stand out. We repeat the frequency analysis using headlines instead of snippets, and we compare the two word-frequency distributions to interpret how titles differ from short excerpts.
+
+### API Function
+
+```{r api-function}
+
+nytAPI <- function(term1, begin_date, end_date, api) {
+  searchQ <- URLencode(term1) 
+  url <- paste0(
+    "https://api.nytimes.com/svc/search/v2/articlesearch.json?q=", searchQ,
+    "&begin_date=", begin_date, "&end_date=", end_date, "&api-key=", api
+  )
+  initialsearch <- fromJSON(url, flatten = TRUE) 
+  hits <- initialsearch$response$meta$hits
+  if (hits == 0) return(data.frame()) 
+  maxPages <- min(round(hits / 10) - 1, 10) 
+  df <- data.frame(
+    id = as.numeric(),
+    created_time = character(),
+    snippet = character(),
+    headline = character()
+  )
+  for (i in 0:maxPages) {
+    nytSearch <- fromJSON(paste0(url, "&page=", i), flatten = TRUE) 
+    temp <- data.frame(
+      id = 1:nrow(nytSearch$response$docs),
+      created_time = nytSearch$response$docs$pub_date,
+      snippet = nytSearch$response$docs$snippet,
+      headline = nytSearch$response$docs$headline.main 
+    )
+    df <- rbind(df, temp)
+    Sys.sleep(12)
+  }
+  return(df)
+}
+```
+
+### Fetch from API and save CSV
+
+```{r fetch}
+# Fetch results using API function
+nytDat <- nytAPI(
+  term1 = "dam removal",
+  begin_date = "20240401",
+  end_date = "20260401",
+  api = API_KEY
+)
+
+write.csv(nytDat, "NYT-dam_removal.csv", row.names = FALSE)
+```
+
+### Publications per day
+
+```{r date-plot}
+# One row per article: aggregate to counts per calendar day; keep busy days only (lab-style filter).
+daily_counts <- nytDat %>%
+  mutate(pubDay = as.Date(created_time)) %>%
+  count(pubDay, name = "count") #%>%
+  #filter(count >= 2)
+
+ggplot(daily_counts, aes(x = reorder(pubDay, count), y = count)) +
+  geom_col(fill = "#2E5AAC", width = 0.85) +
+  coord_flip() +
+  labs(
+    title = "NYT articles per day",
+    x = "Date",
+    y = "Articles"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"), axis.text.y = element_text(size = 7))
+```
+
+### Snippets: tokenize and plot frequencies
+
+```{r plot_frequencies}
+# One token per row; lowercase and punctuation handled by unnest_tokens().
+tokenized <- nytDat %>%
+  unnest_tokens(word, snippet)
+```
+
+
+```{r stop-words}
+data("stop_words") 
+tokenized <- tokenized %>%
+  anti_join(stop_words, by = "word") 
+
+snippet_freq_stop <- tokenized %>% count(word, sort = TRUE)
+ggplot(snippet_freq_stop %>% slice_head(n = 25), aes(x = reorder(word, n), y = n)) +
+  geom_col(fill = "#009E73") +
+  coord_flip() +
+  labs(title = "Snippets: after default stop words", x = NULL, y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+### Three transformations 
+
+Remove numbers, strip possessives, add context-specific stop words (newspaper boilerplate).
+
+```{r cleaning}
+# (1) Remove any token containing a digit
+tokenized <- tokenized %>%
+  filter(!str_detect(word, "[0-9]")) %>%
+  # (2) Simplify possessives
+  mutate(
+    word = str_replace_all(word, "'s$", ""),
+    word = str_replace_all(word, "'s\\b", "")
+  )
+
+# (3) Extra stop words for this corpus
+extra_stop <- tibble(word = c("said", "according", "also", "just", "like", "new", "york", "times"))
+
+tokenized <- tokenized %>%
+  anti_join(extra_stop, by = "word") %>%
+  filter(word != "", !is.na(word))
+
+snippet_freq_clean <- tokenized %>% count(word, sort = TRUE)
+
+ggplot(snippet_freq_clean %>% slice_head(n = 25), aes(x = reorder(word, n), y = n)) +
+  geom_col(fill = "#CC79A7") +
+  coord_flip() +
+  labs(title = "Snippets: cleaned + extra stop words", x = NULL, y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"))
+```
+### Headlines
+Repeat the same process for headlines, which are already extracted into a `headline` column by the lab’s `nytAPI` function. We apply the same cleaning steps so comparisons are fair.
+
+```{r headline-cleaning}
+# Same cleaning order as snippets for a fair comparison
+tokenized_headline <- tokenized %>%
+  anti_join(stop_words, by = "word") %>%
+  filter(!str_detect(word, "[0-9]")) %>%
+  mutate(
+    word = str_replace_all(word, "'s$", ""),
+    word = str_replace_all(word, "'s\\b", "")
+  ) %>%
+  anti_join(extra_stop, by = "word") %>%
+  filter(word != "", !is.na(word))
+
+headline_freq_clean <- tokenized_headline %>% count(word, sort = TRUE)
+
+ggplot(headline_freq_clean %>% slice_head(n = 25), aes(x = reorder(word, n), y = n)) +
+  geom_col(fill = "#0072B2") +
+  coord_flip() +
+  labs(title = "Headlines: cleaned same as snippets", x = NULL, y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+### Compare snippet vs headline (cleaned)
+
+```{r compare-distributions}
+top_n <- 15
+compare_top <- bind_rows(
+  snippet_freq_clean %>% slice_head(n = top_n) %>% mutate(source = "snippet"),
+  headline_freq_clean %>% slice_head(n = top_n) %>% mutate(source = "headline")
+)
+
+ggplot(compare_top, aes(x = reorder(word, n), y = n, fill = source)) +
+  geom_col(show.legend = TRUE) +
+  coord_flip() +
+  facet_wrap(~source, scales = "free_y", ncol = 2) +
+  labs(
+    title = "Top 15 words: snippets vs headlines",
+    x = NULL,
+    y = "Count"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+**Comparison:** Headline tokens are more uneven and “newsy”: one word (salmon) stands out at the top, probably because of the Klamath dam removal where salmon returns were a big deal. The list mixes topic words with broader desk language (trump, budget, wednesday, briefing), which is typical of short titles that grab attention across beats. Snippet tokens sit closer together in count and stay more anchored to the dam-removal story—river, removal, dams, klamath, environmental, federal, fish, and place/policy terms—because excerpts are pulled from article body text and read like descriptive prose rather than compressed headlines.
