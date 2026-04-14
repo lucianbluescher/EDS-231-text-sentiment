@@ -90,8 +90,8 @@ df <- df |>
     "Postmedia Breaking News"
   ))
 
-url <- "https://raw.githubusercontent.com/MaRo406/EDS-231-text-sentiment/refs/heads/main/data/"
-results <- read_csv(url)
+url <- "https://raw.githubusercontent.com/MaRo406/EDS-231-text-sentiment/refs/heads/main/data/nexis-dat.csv"
+df <- read_csv(url)
 ```
 
 ### 1.1 Cleaning the raw text
