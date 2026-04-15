@@ -84,14 +84,17 @@ I used the `{LexisNexisTools}` package to parse `.docx` exports from Nexis. It r
 # )
 
 # Remove wire-service sources that appear as duplicate syndicated content
+url <- "https://raw.githubusercontent.com/MaRo406/EDS-231-text-sentiment/refs/heads/main/data/nexis-dat.csv"
+
+df <- read_csv(url)
+
 df <- df |>
   filter(!source %in% c(
     "National Post (f/k/a The Financial Post) (Canada)",
     "Postmedia Breaking News"
   ))
 
-url <- "https://raw.githubusercontent.com/MaRo406/EDS-231-text-sentiment/refs/heads/main/data/nexis-dat.csv"
-df <- read_csv(url)
+
 ```
 
 ### 1.1 Cleaning the raw text
