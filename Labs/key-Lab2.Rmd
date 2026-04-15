@@ -401,6 +401,17 @@ textplot_keyness(result, n = 20) +
     title = "Keyness: Data Center Coverage",
     subtitle = "Target: 2025  |  Reference: 2021  |  Statistic: Log-Likelihood (G²)"
   )
+
+
+result21 <- textstat_keyness(dfmat_grouped,
+                           target  = "2021",
+                           measure = "lr")
+
+textplot_keyness(result, n = 20) +
+  labs(
+    title = "Keyness: Data Center Coverage",
+    subtitle = "Target: 2021  |  Reference: 2025  |  Statistic: Log-Likelihood (G²)"
+  )
 ```
 
 ------------------------------------------------------------------------
@@ -411,19 +422,19 @@ textplot_keyness(result, n = 20) +
 
 1.  What do the most positive keywords (overrepresented in 2025) tell you about how data center coverage has shifted?
 
-    *Your answer here*
+    Words like "Trump", "tariffs", "bill", "pennsylvania" and "news" suggest that the coverage around data centers has shifted away from economic and techological growth to a more politically charged and energy focused issue. In 2021, during covid, the talk of data centers was about "hosting", "market", "security" and even "solutions". Now with "ai" at the forefront of society, the language reflects concerns about the impact of data centers on local communities, energy consumption, and national security, as well as the influence of political figures and policies on the industry.
 
 2.  Are any of these keywords surprising? What might explain their appearance?
 
-    *Your answer here*
+    It is strange to see names like "lakewood", "altman", "marcos", "hoffman" and "parler" that I am unsure about who they refer to. I would assume they are either authors or sources quoted frequently in the articles. There are also some I don't know what they mean like "douthat", does it mean doubt that? And bannon which is probably another name. Also not sure why "nuclear" and "fusion" are coming up, I wasnt aware about using more nuclear for data centers. Also don't know what "bir" is.
 
 3.  Keyness flags statistical unusualness, not substantive importance. A high-G² word could be driven by a single prolific source or a short news spike. How would you check whether a keyword is genuinely distributed across the corpus rather than concentrated in one place?
 
-    *Your answer here*
+    You could check a keywords distribution across the corpus by looking at its frequency over time, by source, or by article. If a keyword is genuinely distributed, you would expect to see it appearing in multiple articles, across different sources, and over a sustained period of time. If it's concentrated in one place, you might see it appearing in only a few articles, from a single source, or during a short news spike.
 
 4.  How has the language used to describe data centers in news coverage changed over time, and what does that suggest about the evolving journalistic frame around the issue?
 
-    *Your answer here*
+    The language has become generally more concerned. Instead of talking about potential outcomes and possible benefits to society, what will come of data centers, the journalistic frame has shifted to what society should be worried about. As if over the last 5 years we accecpted data centers as a necessary part of our infrastructure and now we are starting to see the consequences of that decision. The frame has shifted from one of potential to one of consequence, which is a significant change in how the issue is being discussed in the media and is seriously driven by politics.
 
 ------------------------------------------------------------------------
 
@@ -431,25 +442,95 @@ textplot_keyness(result, n = 20) +
 
 1.  **Stopword sensitivity:** Remove *all* domain-specific stopwords and re-run the frequency plot. Then add 10 more domain stopwords beyond what was provided. How do your results change? What does this tell you about the analytical choices embedded in preprocessing?
 
-    *Your answer here*
+    Without domain stopwords, topic words related to our search terms dominate. Adding more domain stopwords reveals more specific terms that identify the coverage evolution even more. Ultimately, our results depend a lot on preprocessing choices, which means you should be extra cautious about those choices and document them clearly.
+
 
     ```{r stopword-sensitivity}
+# remove domain specific  stopwords
+tokens_base <- tokens |>
+  anti_join(get_stopwords(source = "smart"), by = "word") |>
+  filter(!str_detect(word, "^[0-9]+$"), str_length(word) > 2)
+    
+# Add 10 domain stopwords
+extra_sw <- tibble(word = c(
+  "project","projects","facility","facilities","site",
+  "sites","construction","development","power","energy"
+))
+
+domain_sw_plus <- bind_rows(domain_sw, extra_sw) |> distinct(word)
+tokens_extra <- tokens |>
+  anti_join(get_stopwords(source = "smart"), by = "word") |>
+  anti_join(domain_sw_plus, by = "word") |>
+  filter(!str_detect(word, "^[0-9]+$"), str_length(word) > 2)
+
+# Top words for each version
+top_base <- tokens_base |> count(word, sort = TRUE) |> slice_head(n = 10) |> mutate(version = "No domain SW")
+top_extra <- tokens_extra |> count(word, sort = TRUE) |> slice_head(n = 10) |> mutate(version = "With extra domain SW")
+top_compare <- bind_rows(top_base, top_extra)
+
+# Simple plot
+ggplot(top_compare, aes(x = reorder(word, n), y = n)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  facet_wrap(~version, scales = "free_y") +
+  labs(title = "Top 10 words under two stopword choices", x = NULL, y = "Count") +
+  theme_minimal()
 
     ```
 
 2.  **Alternative keyness comparison:** Instead of comparing time periods, compare the two sources with the most articles. What does keyness reveal about how each publication frames the data center beat?
 
-    *Your answer here*
+    Keyness shows that NYT frames data centers much more through U.S. politics and policy, with overrepresented terms such as “trump,” “bannon,” “administration,” and “tariffs". Relative to CE Noticias Financieras English, this suggests NYT coverage links data centers to broader political debate, while CE Noticias Financieras likely is more financial and business focused.
 
     ```{r alternative-keyness}
 
+
+tmp <- k_grouped |>
+  textstat_keyness(target = top2[1], measure = "lr") |>
+  as_tibble()
+    
+ # Remove empties and select top 10
+k_out <- tmp |>
+  filter(G2 > 0) |>         
+  slice_head(n = 10)
+
+k_out
+
+ggplot(k_out, aes(x = reorder(feature, G2), y = G2)) +
+  geom_col(fill = "darkorange") +
+  coord_flip() +
+  labs(
+    title = paste("Top key terms:", top2[1]),
+    subtitle = paste("vs", top2[2]),
+    x = NULL, y = "Keyness (G2)"
+  ) +
+  theme_minimal()
     ```
 
 3.  **Bigrams:** Use `unnest_tokens(token = "ngrams", n = 2)` to extract bigrams. What are the 20 most frequent bigrams? Do they reveal entities or conceptual phrases that single-token analysis misses?
 
-    *Your answer here*
-
+    Other than our search terms, "united states" and "artificial intelligence" are the most common. Strongly reinforcing our conclusion that data centers are often framed to a national political context and AI. The bigram analysis also does reveal the inclusion of environmental topics such as "renewable energy", "climate change" and "clean energy" which the single-token analysis mostly missed.
+    
     ```{r bigrams}
+
+bigrams <- df |>
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) |>
+  separate(bigram, c("w1","w2"), sep = " ") |> # Separate to remove stop words
+  filter(!is.na(w1), !is.na(w2),
+         !w1 %in% get_stopwords(source = "smart")$word,
+         !w2 %in% get_stopwords(source = "smart")$word,
+         str_detect(w1, "^[a-z]+$"), str_detect(w2, "^[a-z]+$")) |>
+  unite(bigram, w1, w2, sep = " ") |> # bring back together
+  count(bigram, sort = TRUE) |>
+  slice_head(n = 20)
+    
+ggplot(bigrams, aes(reorder(bigram, n), n)) +
+  geom_col(fill = "seagreen") +
+  coord_flip() +
+  labs(title = "Top 20 bigrams", x = NULL, y = "Count") +
+  theme_minimal()
+
+bigrams
 
     ```
 

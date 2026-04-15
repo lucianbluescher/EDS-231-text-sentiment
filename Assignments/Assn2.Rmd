@@ -34,7 +34,8 @@ output: html_document
     Without domain stopwords, topic words related to our search terms dominate. Adding more domain stopwords reveals more specific terms that identify the coverage evolution even more. Ultimately, our results depend a lot on preprocessing choices, which means you should be extra cautious about those choices and document them clearly.
 
 
-    ```{r stopword-sensitivity}
+```{r, eval = FALSE}
+
 # remove domain specific  stopwords
 tokens_base <- tokens |>
   anti_join(get_stopwords(source = "smart"), by = "word") |>
@@ -65,13 +66,13 @@ ggplot(top_compare, aes(x = reorder(word, n), y = n)) +
   labs(title = "Top 10 words under two stopword choices", x = NULL, y = "Count") +
   theme_minimal()
 
-    ```
+```
 
 2.  **Alternative keyness comparison:** Instead of comparing time periods, compare the two sources with the most articles. What does keyness reveal about how each publication frames the data center beat?
 
     Keyness shows that NYT frames data centers much more through U.S. politics and policy, with overrepresented terms such as “trump,” “bannon,” “administration,” and “tariffs". Relative to CE Noticias Financieras English, this suggests NYT coverage links data centers to broader political debate, while CE Noticias Financieras likely is more financial and business focused.
 
-    ```{r alternative-keyness}
+```{r alternative-keyness, eval = FALSE}
 
 
 tmp <- k_grouped |>
@@ -94,13 +95,13 @@ ggplot(k_out, aes(x = reorder(feature, G2), y = G2)) +
     x = NULL, y = "Keyness (G2)"
   ) +
   theme_minimal()
-    ```
+```
 
 3.  **Bigrams:** Use `unnest_tokens(token = "ngrams", n = 2)` to extract bigrams. What are the 20 most frequent bigrams? Do they reveal entities or conceptual phrases that single-token analysis misses?
 
     Other than our search terms, "united states" and "artificial intelligence" are the most common. Strongly reinforcing our conclusion that data centers are often framed to a national political context and AI. The bigram analysis also does reveal the inclusion of environmental topics such as "renewable energy", "climate change" and "clean energy" which the single-token analysis mostly missed.
     
-    ```{r bigrams}
+```{r bigrams, eval = FALSE}
 
 bigrams <- df |>
   unnest_tokens(bigram, text, token = "ngrams", n = 2) |>
@@ -121,6 +122,6 @@ ggplot(bigrams, aes(reorder(bigram, n), n)) +
 
 bigrams
 
-    ```
+```
 
 ------------------------------------------------------------------------
