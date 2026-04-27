@@ -396,10 +396,10 @@ result <- textstat_keyness(dfmat_grouped,
                            target  = "2025",
                            measure = "lr")
 
-textplot_keyness(result, n = 20) +
+textplot_keyness(result21, n = 20) +
   labs(
     title = "Keyness: Data Center Coverage",
-    subtitle = "Target: 2025  |  Reference: 2021  |  Statistic: Log-Likelihood (G²)"
+    subtitle = "Target: 2021  |  Reference: 2025  |  Statistic: Log-Likelihood (G²)"
   )
 
 
@@ -482,19 +482,37 @@ ggplot(top_compare, aes(x = reorder(word, n), y = n)) +
 
     Keyness shows that NYT frames data centers much more through U.S. politics and policy, with overrepresented terms such as “trump,” “bannon,” “administration,” and “tariffs". Relative to CE Noticias Financieras English, this suggests NYT coverage links data centers to broader political debate, while CE Noticias Financieras likely is more financial and business focused.
 
-    ```{r alternative-keyness}
+```{r alternative-keyness}
+top2 <- df |>
+  count(source, sort = TRUE) |>
+  slice_head(n = 2) |>
+  pull(source)
 
+df_top2 <- df |> filter(source %in% top2)
 
-tmp <- k_grouped |>
-  textstat_keyness(target = top2[1], measure = "lr") |>
+corp2 <- corpus(df_top2, docid_field = "id", text_field = "text")
+
+toks2 <- tokens(
+  corp2,
+  remove_punct = TRUE,
+  remove_numbers = TRUE,
+  remove_symbols = TRUE
+) |>
+  tokens_tolower() |>
+  tokens_remove(stopwords("en", source = "smart")) |>
+  tokens_remove(domain_sw$word)
+
+dfm2 <- dfm(toks2)
+
+k_grouped <- dfm_group(dfm2, groups = docvars(dfm2, "source"))
+
+tmp <- textstat_keyness(k_grouped, target = top2[1], measure = "lr") |>
   as_tibble()
-    
- # Remove empties and select top 10
-k_out <- tmp |>
-  filter(G2 > 0) |>         
-  slice_head(n = 10)
 
-k_out
+k_out <- tmp |>
+  filter(G2 > 0) |>
+  arrange(desc(G2)) |>
+  slice_head(n = 10)
 
 ggplot(k_out, aes(x = reorder(feature, G2), y = G2)) +
   geom_col(fill = "darkorange") +
@@ -505,20 +523,21 @@ ggplot(k_out, aes(x = reorder(feature, G2), y = G2)) +
     x = NULL, y = "Keyness (G2)"
   ) +
   theme_minimal()
-    ```
+```
 
 3.  **Bigrams:** Use `unnest_tokens(token = "ngrams", n = 2)` to extract bigrams. What are the 20 most frequent bigrams? Do they reveal entities or conceptual phrases that single-token analysis misses?
 
     Other than our search terms, "united states" and "artificial intelligence" are the most common. Strongly reinforcing our conclusion that data centers are often framed to a national political context and AI. The bigram analysis also does reveal the inclusion of environmental topics such as "renewable energy", "climate change" and "clean energy" which the single-token analysis mostly missed.
     
     ```{r bigrams}
-
+sw_words <- get_stopwords(source = "smart")$word
+    
 bigrams <- df |>
   unnest_tokens(bigram, text, token = "ngrams", n = 2) |>
   separate(bigram, c("w1","w2"), sep = " ") |> # Separate to remove stop words
   filter(!is.na(w1), !is.na(w2),
-         !w1 %in% get_stopwords(source = "smart")$word,
-         !w2 %in% get_stopwords(source = "smart")$word,
+        !w1 %in% sw_words,
+        !w2 %in% sw_words,
          str_detect(w1, "^[a-z]+$"), str_detect(w2, "^[a-z]+$")) |>
   unite(bigram, w1, w2, sep = " ") |> # bring back together
   count(bigram, sort = TRUE) |>

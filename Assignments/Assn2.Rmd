@@ -1,9 +1,14 @@
 ---
 title: "Assignment 2"
-output: html_document
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: inline
 ---
 
 ------------------------------------------------------------------------
+
 
 *Create a new .Rmd file for your submission. Use the lab code as a reference, but your submission should contain only your own analysis — not the demo walkthrough. For the submission, answer each of the questions in part 7 and part 8 below.*
 
@@ -34,8 +39,7 @@ output: html_document
     Without domain stopwords, topic words related to our search terms dominate. Adding more domain stopwords reveals more specific terms that identify the coverage evolution even more. Ultimately, our results depend a lot on preprocessing choices, which means you should be extra cautious about those choices and document them clearly.
 
 
-```{r, eval = FALSE}
-
+    ```{r stopword-sensitivity}
 # remove domain specific  stopwords
 tokens_base <- tokens |>
   anti_join(get_stopwords(source = "smart"), by = "word") |>
@@ -66,25 +70,43 @@ ggplot(top_compare, aes(x = reorder(word, n), y = n)) +
   labs(title = "Top 10 words under two stopword choices", x = NULL, y = "Count") +
   theme_minimal()
 
-```
+    ```
 
 2.  **Alternative keyness comparison:** Instead of comparing time periods, compare the two sources with the most articles. What does keyness reveal about how each publication frames the data center beat?
 
     Keyness shows that NYT frames data centers much more through U.S. politics and policy, with overrepresented terms such as “trump,” “bannon,” “administration,” and “tariffs". Relative to CE Noticias Financieras English, this suggests NYT coverage links data centers to broader political debate, while CE Noticias Financieras likely is more financial and business focused.
 
-```{r alternative-keyness, eval = FALSE}
+```{r alternative-keyness}
+top2 <- df |>
+  count(source, sort = TRUE) |>
+  slice_head(n = 2) |>
+  pull(source)
 
+df_top2 <- df |> filter(source %in% top2)
 
-tmp <- k_grouped |>
-  textstat_keyness(target = top2[1], measure = "lr") |>
+corp2 <- corpus(df_top2, docid_field = "id", text_field = "text")
+
+toks2 <- tokens(
+  corp2,
+  remove_punct = TRUE,
+  remove_numbers = TRUE,
+  remove_symbols = TRUE
+) |>
+  tokens_tolower() |>
+  tokens_remove(stopwords("en", source = "smart")) |>
+  tokens_remove(domain_sw$word)
+
+dfm2 <- dfm(toks2)
+
+k_grouped <- dfm_group(dfm2, groups = docvars(dfm2, "source"))
+
+tmp <- textstat_keyness(k_grouped, target = top2[1], measure = "lr") |>
   as_tibble()
-    
- # Remove empties and select top 10
-k_out <- tmp |>
-  filter(G2 > 0) |>         
-  slice_head(n = 10)
 
-k_out
+k_out <- tmp |>
+  filter(G2 > 0) |>
+  arrange(desc(G2)) |>
+  slice_head(n = 10)
 
 ggplot(k_out, aes(x = reorder(feature, G2), y = G2)) +
   geom_col(fill = "darkorange") +
@@ -101,14 +123,15 @@ ggplot(k_out, aes(x = reorder(feature, G2), y = G2)) +
 
     Other than our search terms, "united states" and "artificial intelligence" are the most common. Strongly reinforcing our conclusion that data centers are often framed to a national political context and AI. The bigram analysis also does reveal the inclusion of environmental topics such as "renewable energy", "climate change" and "clean energy" which the single-token analysis mostly missed.
     
-```{r bigrams, eval = FALSE}
-
+    ```{r bigrams}
+sw_words <- get_stopwords(source = "smart")$word
+    
 bigrams <- df |>
   unnest_tokens(bigram, text, token = "ngrams", n = 2) |>
   separate(bigram, c("w1","w2"), sep = " ") |> # Separate to remove stop words
   filter(!is.na(w1), !is.na(w2),
-         !w1 %in% get_stopwords(source = "smart")$word,
-         !w2 %in% get_stopwords(source = "smart")$word,
+        !w1 %in% sw_words,
+        !w2 %in% sw_words,
          str_detect(w1, "^[a-z]+$"), str_detect(w2, "^[a-z]+$")) |>
   unite(bigram, w1, w2, sep = " ") |> # bring back together
   count(bigram, sort = TRUE) |>
@@ -122,6 +145,7 @@ ggplot(bigrams, aes(reorder(bigram, n), n)) +
 
 bigrams
 
-```
+    ```
 
 ------------------------------------------------------------------------
+
