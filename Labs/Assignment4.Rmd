@@ -1,0 +1,323 @@
+---
+title: 'Assignment 4: Topic Analysis (LDA)'
+author: "Lucian Scher"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+editor_options:
+  markdown:
+    wrap: 72
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 9,
+  fig.height = 6
+)
+```
+
+## Introduction
+
+This notebook applies latent Dirichlet allocation (LDA) to LexisNexis
+news articles on **artificial intelligence and conservation**. The goal
+is to discover latent themes, choose a defensible number of topics `k`,
+and interpret the resulting topics.
+
+```{r packages}
+library(LexisNexisTools)
+library(here)
+library(quanteda)
+library(topicmodels)
+library(topicdoc)
+library(ldatuning)
+library(tidyverse)
+library(tidytext)
+library(reshape2)
+library(tictoc)
+library(LDAvis)
+library(tsne)
+```
+
+## 1. Build and clean your corpus
+
+```{r data}
+nexis_dir <- here::here("Nexis", "AI_conservation")
+
+pre_files <- list.files(
+  path = nexis_dir,
+  pattern = "\\.docx$",
+  full.names = TRUE,
+  recursive = TRUE,
+  ignore.case = TRUE
+)
+
+pre_dat <- lnt_read(pre_files)
+
+pre_meta_df     <- pre_dat@meta
+pre_articles_df <- pre_dat@articles
+pre_paragraphs_df <- pre_dat@paragraphs
+
+df <- tibble(
+  date     = pre_meta_df$Date,
+  headline = pre_meta_df$Headline,
+  id       = pre_meta_df$ID,
+  text     = pre_articles_df$Article,
+  source   = pre_meta_df$Newspaper
+) |>
+  filter(!is.na(text), nzchar(trimws(text)))
+
+nrow(df)
+```
+
+```{r corpus}
+corp <- corpus(df, docid_field = "id", text_field = "text")
+
+add_stops <- c(
+  quanteda::stopwords("en", source = "smart"),
+  "said", "says", "say", "told", "according",
+  "vol", "document", "fig", "pg", "usepackage",
+  "system", "systems",
+  "ai", "artificial", "intelligence",
+  "conservation", "conserving",
+  "1", "=", "$", "0"
+)
+
+toks <- tokens(corp, remove_punct = TRUE, remove_numbers = TRUE) |>
+  tokens_tolower() |>
+  tokens_remove(pattern = add_stops)
+
+dfm_raw <- dfm(toks)
+dfm_prep <- dfm_trim(dfm_raw, min_docfreq = 2)
+dfm <- dfm_prep[quanteda::ntoken(dfm_prep) > 0, ]
+
+quanteda::ndoc(dfm)
+quanteda::nfeat(dfm)
+```
+
+```{r topicmodels-format}
+dtm_tm <- quanteda::convert(dfm, to = "topicmodels")
+```
+
+## 2. Select k using multiple criteria
+
+### 2a. Coherence (topicdoc)
+
+```{r coherence-grid, cache=TRUE}
+tic()
+k_hi <- min(18L, max(2L, quanteda::ndoc(dfm) - 1L))
+k_vals <- seq.int(from = 2L, to = k_hi)
+
+coherence_tbl <- map_dfr(k_vals, \(k) {
+  m <- LDA(
+    dtm_tm,
+    k = k,
+    method = "Gibbs",
+    control = list(iter = 250, verbose = 0, seed = 321)
+  )
+  coh <- topic_coherence(m, dfm)
+  tibble(k = k, topic = seq_len(k), coherence = as.numeric(coh))
+})
+
+coherence_summary <- coherence_tbl |>
+  group_by(k) |>
+  summarise(mean_coherence = mean(coherence, na.rm = TRUE), .groups = "drop")
+
+k_coherence <- coherence_summary$k[which.max(coherence_summary$mean_coherence)]
+
+ggplot(coherence_summary, aes(k, mean_coherence)) +
+  geom_line(color = "#1B4965", linewidth = 1) +
+  geom_point(color = "#1B4965", size = 2) +
+  geom_vline(xintercept = k_coherence, linetype = "dashed", color = "#C1121F") +
+  labs(
+    title = "Mean topic coherence by k",
+    subtitle = "Dashed line: k with highest mean coherence",
+    x = "k (number of topics)",
+    y = "Mean coherence"
+  ) +
+  theme_minimal()
+toc()
+```
+
+### 2b. FindTopicsNumber() optimization metrics (ldatuning)
+
+```{r find-topics-number, cache=TRUE}
+tic()
+ftn <- FindTopicsNumber(
+  dtm_tm,
+  topics = 2:16,
+  metrics = c("CaoJuan2009", "Arun2010", "Deveaud2014"),
+  method = "Gibbs",
+  control = list(seed = 321, verbose = 0, burnin = 1000, iter = 2000, keep = 0),
+  mc.cores = 1L
+)
+toc()
+
+plot(ftn)
+```
+
+```{r ftn-suggest-k}
+ks <- ftn$topics
+
+k_cao     <- ks[which.min(ftn$CaoJuan2009)]
+k_arun    <- ks[which.min(ftn$Arun2010)]
+k_deveaud <- ks[which.max(ftn$Deveaud2014)]
+
+tibble(
+  metric = c("CaoJuan2009 (min)", "Arun2010 (min)", "Deveaud2014 (max)"),
+  suggested_k = c(k_cao, k_arun, k_deveaud)
+)
+```
+
+### 2c. Three explicit candidate models (3 k values)
+
+```{r three-candidates}
+candidate_ks <- sort(unique(c(
+  k_coherence,
+  max(2, k_coherence - 3),
+  round(median(c(k_cao, k_arun, k_deveaud), na.rm = TRUE))
+)))[1:3]
+
+models_3 <- setNames(
+  lapply(candidate_ks, \(k) LDA(
+    dtm_tm, k = k, method = "Gibbs",
+    control = list(iter = 800, verbose = 0, seed = 321)
+  )),
+  candidate_ks
+)
+```
+
+```{r choose-k, echo=TRUE}
+k <- k_coherence
+k
+```
+### 2d. k Justification
+
+I chose k = 3 because the topics are more coherent and interpretable than the other candidates. The coherence metric indicated that k = 3 had the highest mean topic coherence, suggesting that the topics are more semantically meaningful. Additionally, the top terms for k = 3 were more distinct and easier to interpret compared to the other models, which had more overlapping or less coherent terms. Overall, k = 3 provided a good balance between model complexity and interpretability for this dataset.
+
+## 3. Fit your final model and visualize top terms
+
+```{r lda-final-model, results=FALSE}
+topicModel_final <- LDA(
+  dtm_tm,
+  k = k,
+  method = "Gibbs",
+  control = list(iter = 2000, verbose = 50, seed = 321)
+)
+```
+
+
+```{r lda-final-results}
+tmResult <- posterior(topicModel_final)
+theta_mat <- tmResult$topics
+
+topics_beta <- tidy(topicModel_final, matrix = "beta")
+
+top_terms <- topics_beta |>
+  group_by(topic) |>
+  slice_max(beta, n = 10) |>
+  ungroup() |>
+  mutate(topic = factor(topic))
+
+top_terms |>
+  mutate(term = tidytext::reorder_within(term, beta, topic, sep = "")) |>
+  ggplot(aes(term, beta, fill = topic)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free_y") +
+  tidytext::scale_x_reordered() +
+  coord_flip() +
+  labs(
+    title = "Top 10 terms per topic (final model)",
+    subtitle = expression(beta ~ "=" ~ P(term ~ "|" ~ topic)),
+    x = NULL,
+    y = expression(beta)
+  ) +
+  theme_minimal()
+```
+
+## 4. Visualize document-topic distributions (θ)
+
+```{r theta-plot}
+set.seed(10)
+sample_n <- min(8L, nrow(theta_mat))
+
+doc_idx <- seq_len(sample_n)
+props <- theta_mat[doc_idx, , drop = FALSE]
+
+tw10 <- terms(topicModel_final, 10)
+stub_names <- apply(tw10, 2, \(col) paste(utils::head(col, 3), collapse = ", "))
+colnames(props) <- paste0("T", seq_len(ncol(props)), ": ", stub_names)
+
+viz_df <- reshape2::melt(
+  cbind(data.frame(props), document = factor(doc_idx, labels = paste0("doc_", doc_idx))),
+  variable.name = "topic_stub",
+  id.vars = "document"
+)
+
+ggplot(viz_df, aes(topic_stub, value, fill = document)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  facet_wrap(~ document, ncol = 2L) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = rel(0.7))) +
+  labs(
+    title = "Topic distributions across sampled documents",
+    subtitle = expression(theta ~ "=" ~ P(topic ~ "|" ~ document)),
+    x = NULL,
+    y = "Topic proportion"
+  )
+```
+
+## 5. LDAvis
+
+```{r LDAvis}
+svd_tsne <- function(x) tsne(svd(x)$u)
+
+json <- createJSON(
+  phi            = tmResult$terms,
+  theta          = tmResult$topics,
+  doc.length     = rowSums(dfm),
+  vocab          = colnames(dfm),
+  term.frequency = colSums(dfm),
+  mds.method     = svd_tsne,
+  plot.opts      = list(xlab = "", ylab = "")
+)
+
+serVis(json)
+```
+
+## 6. Interpret your topics
+
+```{r topic-terms-and-names}
+topic_terms <- terms(topicModel_final, 10)
+
+topic_names <- c(
+  "Policy and Large-scale applications",
+  "Wildlife preservation and monitoring",
+  "Science and research"
+)
+
+topic_table <- as_tibble(topic_terms, .name_repair = "minimal")
+colnames(topic_table) <- topic_names
+
+topic_table
+```
+
+### Interpretation
+
+*Policy and Large-scale applications*
+This topic is about scaling AI tools for policy and operational decision-making, especially using big datasets and predictive modeling. The most diagnostic words are data, models/model, learning, detection, and deep. Several ambiguous terms (species, animal, images) sound like ecology/computer vision and may overlap with monitoring rather than pure policy.
+
+*Wildlife preservation and monitoring*
+This topic appears to be computational biology / lab-style monitoring language (cell and gene processes) rather than wildlife conservation in the usual sense. The most diagnostic words are cells/cell, protein, expression, gene, and binding. Surprising/ambiguous terms include sleep and the symbol “+”, which look like extraction noise rather than a clear theme.
+
+*Science and research*
+This topic reads as research-and-development framing around scientific applications, including energy/climate-related work and technical modeling. The most diagnostic words are energy, carbon, development, study, and models/model/framework. The ambiguous word is drug, which suggests some articles in the corpus are biomedical and may be pulling the topic away from conservation-specific science.
